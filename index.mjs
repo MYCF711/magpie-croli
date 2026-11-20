@@ -14,7 +14,11 @@ import {
   parseCroliInviteInput,
   writeReservedCroliInvite,
   resolveCroliInviteSource,
+  readCroliInviteAccounts,
+  readCroliInviteSelection,
+  writeCroliInviteSelection,
 } from "./src/croli-account.mjs"
+import { readPreferredUid } from "./src/preferred.mjs"
 import {
   PROVIDER,
   BASE,
@@ -71,24 +75,71 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
   }
 
   let pendingInvite = null
+  const cacheDir = () => _options.inviteCacheDir
+  const configDir = () => _options.magpieConfigDir
+  const accounts = () => readCroliInviteAccounts({ cacheDir: cacheDir(), configDir: configDir() })
+  const preferredUid = () => readPreferredUid(PROVIDER, { configDir: configDir() }).uid
   const invitePrompt = () => ({
     type: "text",
     key: "invite",
-    message: "邀请码（留空使用默认邀请源；仅新注册账号有效）",
-    placeholder: "留空使用首选账号；也可填官方邀请链接或邀请码",
+    message: "手动邀请码（仅新注册账号有效）",
+    placeholder: "留空 / 0 / 1 沿用手动预留码；也可填官方邀请链接或新邀请码",
+    placement: "top",
   })
-  const selectInvite = (inputs = {}) => {
-    const parsed = parseCroliInviteInput(inputs.invite)
-    if (!parsed.ok) return { error: parsed.reason }
-    if (!parsed.automatic) {
-      const reserved = writeReservedCroliInvite(parsed.code, { cacheDir: _options.inviteCacheDir })
-      return { ...reserved, kind: "reserved", uid: "" }
+  const sourcePrompt = (rows, selected) => {
+    const automatic = { value: "latest", label: "最新账号（自动滚动邀请）" }
+    const manual = { value: "manual", label: "手动输入邀请码" }
+    const options = [automatic, ...rows.map((row) => ({ value: row.uid, label: `${row.label}（${row.uid}）` })), manual]
+    const remembered = String(selected ?? readCroliInviteSelection(cacheDir()) ?? preferredUid() ?? "latest").trim() || preferredUid() || "latest"
+    const preferred = options.find((item) => item.value === remembered)
+    return {
+      type: "select",
+      key: "inviteSource",
+      message: "邀请来源（记住本次选择）",
+      options: preferred ? [preferred, ...options.filter((item) => item !== preferred)] : options,
+      placement: "top",
     }
+  }
+  const cachedInvite = () => {
+    const preferred = option("invite_preferred", true)
+    const saved = readCroliInviteSelection(cacheDir())
     return resolveCroliInviteSource({
-      preferFirst: option("invite_mode", true),
-      cacheDir: _options.inviteCacheDir,
-      configDir: _options.magpieConfigDir,
+      preferFirst: preferred && saved !== "latest",
+      preferredUid: saved === "manual" ? "__manual__" : saved || preferredUid(),
+      cacheDir: cacheDir(),
+      configDir: configDir(),
     })
+  }
+  const captureInvite = async (inputs = {}) => {
+    const preferred = option("invite_preferred", true)
+    const rows = accounts()
+    const selection = preferred
+      ? String(inputs.inviteSource ?? readCroliInviteSelection(cacheDir()) ?? preferredUid() ?? "latest").trim() || preferredUid() || "latest"
+      : "latest"
+    if (selection === "manual" || rows.length === 0) {
+      if (preferred && Object.prototype.hasOwnProperty.call(inputs, "inviteSource")) {
+        writeCroliInviteSelection("manual", { cacheDir: cacheDir() })
+      }
+      const parsed = parseCroliInviteInput(inputs.invite)
+      if (!parsed.ok) return { error: parsed.reason }
+      if (!parsed.automatic) {
+        const reserved = writeReservedCroliInvite(parsed.code, { cacheDir: cacheDir() })
+        return { ...reserved, kind: "reserved", uid: "" }
+      }
+      return resolveCroliInviteSource({ preferFirst: true, preferredUid: "__manual__", cacheDir: cacheDir(), configDir: configDir() })
+    }
+    const account = selection === "latest" ? rows[0] : rows.find((row) => row.uid === selection)
+    const chosen = account ?? rows[0]
+    if (!chosen) return cachedInvite()
+    if (preferred && Object.prototype.hasOwnProperty.call(inputs, "inviteSource")) {
+      writeCroliInviteSelection(selection === "latest" ? "latest" : chosen.uid, { cacheDir: cacheDir() })
+    }
+    try {
+      const own = await ensureInvite(chosen.auth, { cacheDir: cacheDir(), fetchImpl: _options.fetchImpl })
+      return { ...own, kind: selection === "latest" ? "latest" : "preferred", uid: chosen.uid }
+    } catch {
+      return resolveCroliInviteSource({ preferFirst: true, preferredUid: chosen.uid, cacheDir: cacheDir(), configDir: configDir() })
+    }
   }
   const importDesktopResult = async () => {
     try {
@@ -138,13 +189,10 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
           default: true,
         },
         {
-          key: "invite_mode",
+          key: "invite_preferred",
           label: "首选账号作为邀请源",
-          // Magpie 的 .plugin-options.top 会撞上页头 .top 的 46px 限高；
-          // 顶部只保留这一项，且不放第二行描述，避免压入模型区。
-          description: "",
+          description: "关闭：自动使用最新注册账号滚动邀请；开启：登录时选择最新账号、指定账号或手动邀请码，并记住选择。",
           default: true,
-          placement: "top",
         },
       ],
 
@@ -167,16 +215,30 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
           // 新账号注册：默认使用首选账号的邀请链接；已有账号请用一次性导入，不重复绑定。
           type: "oauth",
           label: "使用邀请链接注册并导入",
-          get prompts() { return [invitePrompt()] },
+          get prompts() {
+            const rows = accounts()
+            if (rows.length === 0) return [invitePrompt()]
+            return option("invite_preferred", true) ? [sourcePrompt(rows)] : []
+          },
           async ask(inputs = {}) {
-            if (!Object.prototype.hasOwnProperty.call(inputs, "invite")) return invitePrompt()
-            const selected = selectInvite(inputs)
+            const rows = accounts()
+            const preferred = option("invite_preferred", true)
+            if (preferred && rows.length > 0 && !Object.prototype.hasOwnProperty.call(inputs, "inviteSource")) {
+              return sourcePrompt(rows)
+            }
+            const selection = preferred
+              ? String(inputs.inviteSource ?? readCroliInviteSelection(cacheDir()) ?? preferredUid() ?? "latest").trim() || preferredUid() || "latest"
+              : "latest"
+            if ((selection === "manual" || rows.length === 0) && !Object.prototype.hasOwnProperty.call(inputs, "invite")) {
+              return invitePrompt()
+            }
+            const selected = await captureInvite(inputs)
             if (selected.error) return { ...invitePrompt(), message: selected.error }
             pendingInvite = selected
             return null
           },
           async authorize() {
-            const selected = pendingInvite ?? selectInvite()
+            const selected = pendingInvite ?? cachedInvite()
             const hasCode = Boolean(selected.code)
             return {
               url: hasCode ? selected.url : "https://www.croli.net/",
@@ -242,7 +304,7 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
         const usageKey = uidOf(auth)
         const [creditResult, inviteResult] = await Promise.allSettled([
           usageCache.readSWR(String(usageKey), () => fetchCredits(auth), { timeoutMs: 10_000 }),
-          option("invite_mode", true) ? ensureInvite(auth, { cacheDir: _options.inviteCacheDir }) : Promise.resolve(null),
+          option("invite_preferred", true) ? ensureInvite(auth, { cacheDir: _options.inviteCacheDir }) : Promise.resolve(null),
         ])
         const windows = []
         if (creditResult.status === "fulfilled") {
@@ -295,7 +357,7 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
           try {
             const result = await checkinToday(auth)
             usageCache.clear(key)
-            if (option("invite_mode", true)) {
+            if (option("invite_preferred", true)) {
               try {
                 const invite = await ensureInvite(auth, { cacheDir: _options.inviteCacheDir })
                 result.message = `${result.message} · 邀请链接：${invite.url}`

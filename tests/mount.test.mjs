@@ -101,10 +101,10 @@ test("chat.headers 不添加任何客户端头；选项在使用点读取", asyn
   const output = { headers: { existing: "kept" } }
   await plugin["chat.headers"]({ model: { providerID: "croli" }, sessionID: "secret-session" }, output)
   assert.deepEqual(output, { headers: { existing: "kept" } })
-  assert.deepEqual(plugin.auth.options.map((item) => item.key), ["stream-usage", "auto-checkin", "invite_mode"])
+  assert.deepEqual(plugin.auth.options.map((item) => item.key), ["stream-usage", "auto-checkin", "invite_preferred"])
   for (const item of plugin.auth.options) assert.equal(item.default, true)
-  assert.deepEqual(plugin.auth.options.map((item) => item.placement), [undefined, undefined, "top"])
-  assert.equal(plugin.auth.options.find((item) => item.key === "invite_mode")?.description, "")
+  assert.deepEqual(plugin.auth.options.map((item) => item.placement), [undefined, undefined, undefined])
+  assert.match(plugin.auth.options.find((item) => item.key === "invite_preferred")?.description, /指定账号或手动邀请码/)
   assert.match(source, /_ctx\?\.magpie\?\.option\?\.\(PROVIDER, key\)/)
   assert.match(source, /option\("stream-usage", true\)/)
 })

@@ -66,10 +66,10 @@ DSH / 其他 OpenAI 客户端
 - `POST /credits/v1/ops/events` 使用账号指纹与周期组成幂等 eventId，metadata 只有 `source` 和 `model`，没有 token。
 - `POST /credits/v1/invite/code` 固定 `{rotate:false}`；官方稳定分享地址为 `https://www.croli.net/invite/?code=<code>`。
 - 邀请缓存位于 `~/.cache/magpie/croli-invite-<账号指纹>.json`，只保存 code、URL、奖励与完成统计。账号索引只保存稳定 uid 的散列文件名与首次/最近见到时间，不保存显示名或 token。
-- 默认 `invite_mode=true`：通过 `logins.json → plugin-auth.json` 只读解析 magpie 首选 uid 并使用其邀请码；关闭时回退最近首次见到的账号，最后才回手动预留码。首选缺码时不静默换到其他账号。
-- 「使用邀请链接注册并导入」要求非空 prompts；`ask()` 只读本地缓存并记住手动预留，`authorize(undefined)` 只返回 URL，零出站。邀请关系只在用户于官方页面新注册时建立，已有账号不调用绑定端点。
+- 默认 `invite_preferred=true`：`inviteSource` 下拉把 Magpie 首选 uid 排在第一项，也可选 `latest`、其他稳定 uid 或 `manual`。选择写入独立 `croli-invite-source.json`，不保存 token；关闭开关时直接使用最新账号。
+- 「使用邀请链接注册并导入」在 `ask()` 中按所选 uid 调 `ensureInvite()` 取该账号自己的码并记住选择，`authorize(undefined)` 复用同一快照，零出站。手动分支才显示邀请码输入，预留码与账号选择分文件保存。邀请关系只在用户于官方页面新注册时建立，已有账号不调用绑定端点。
 
-「首选账号作为邀请源」是唯一使用 `placement: "top"` 的紧凑单行选项，签到和 Token 用量位于模型下方；三个开关都在调用点实时读取。关闭邀请后回退最近账号与手动预留，关闭签到后不执行签到或任务事件上报。Magpie 当前 `.plugin-options.top` 会撞上页头 `.top { height:46px }`，不能并排堆叠多个置顶项。
+「首选账号作为邀请源」与签到、Token 用量都显示完整说明，暂位于模型下方，三个开关在调用点实时读取。关闭邀请后自动使用最近账号，关闭签到后不执行签到或任务事件上报。Magpie 当前 `.plugin-options.top` 会撞上页头 `.top { height:46px }`，完整多行置顶需等待上游 #7353 修复。
 
 ## 模型元数据
 

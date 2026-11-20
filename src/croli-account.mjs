@@ -349,6 +349,40 @@ function reservedInvite(cacheDir) {
   return parsed.ok && parsed.code ? { ...parsed, kind: "reserved", uid: "" } : null
 }
 
+/** 登录选择器只在这里读取宿主 auth；auth 对象不落盘、不进 prompt。 */
+export function readCroliInviteAccounts({ cacheDir = join(homedir(), ".cache", "magpie"), configDir = join(homedir(), ".config", "magpie") } = {}) {
+  const document = readJson(join(configDir, "plugin-auth.json"), {})
+  const seen = readJson(inviteAccountsFile(cacheDir), {})
+  const rows = []
+  for (const [home, auth] of Object.entries(document && typeof document === "object" && !Array.isArray(document) ? document : {})) {
+    const uid = String(auth?.metadata?.userId || "").trim()
+    if (!uid || !accountJwt(auth)) continue
+    rows.push({
+      uid,
+      home,
+      auth,
+      accountId: String(auth?.accountId || "").trim(),
+      firstSeenAt: Number(seen?.[uid]?.firstSeenAt) || 0,
+      lastSeenAt: Number(seen?.[uid]?.lastSeenAt) || 0,
+    })
+  }
+  rows.sort((a, b) => b.firstSeenAt - a.firstSeenAt || b.lastSeenAt - a.lastSeenAt || a.home.localeCompare(b.home))
+  return rows.map((row, index) => ({ ...row, label: row.accountId || `Croli 账号 ${index + 1}` }))
+}
+
+export function readCroliInviteSelection(cacheDir = join(homedir(), ".cache", "magpie")) {
+  const entry = readJson(join(cacheDir, "croli-invite-source.json"), null)
+  return String(entry?.code || "").trim()
+}
+
+export function writeCroliInviteSelection(selection, { cacheDir = join(homedir(), ".cache", "magpie"), now = Date.now } = {}) {
+  const code = String(selection || "").trim()
+  if (!code) return null
+  const entry = { code, source: "chosen", at: Math.trunc(Number(now())) }
+  writeJson(join(cacheDir, "croli-invite-source.json"), entry)
+  return entry
+}
+
 /** 默认只用 magpie 首选账号；关闭时使用最近首次见到的账号；最后才回手动预留码。 */
 export function resolveCroliInviteSource({ preferFirst = true, preferredUid = "", cacheDir = join(homedir(), ".cache", "magpie"), configDir } = {}) {
   if (preferFirst) {

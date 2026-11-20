@@ -9,7 +9,7 @@
 | 插件 | `magpie-croli` |
 | 显示名 | `Croli 免费模型 Croli Free Models` |
 | provider | `croli` |
-| 当前版本 | `0.1.4`（GitHub 源码与 Release，未发 npm） |
+| 当前版本 | `0.1.5`（GitHub 源码与 Release，未发 npm） |
 | 上游脚手架 | `MYCF711/magpie-plugin-scaffold` v0.3.14 / `d4c7a5014f64f3582b92a9a3e543949b57c6e96c` |
 | 定位 | 四模型原生 API Key 直通，脱离 Croli 客户端，零客户端提示词注入 |
 
@@ -17,14 +17,14 @@
 
 ```text
 分支        main（GitHub MYCF711/magpie-croli 首发）
-版本        0.1.4
+版本        0.1.5
 发布状态    GitHub 源码与 Release；无 npm
 ```
 
 | 资产 | 数量 |
 |---|---:|
 | `src/` 模块 | 33 个 |
-| `tests/` | 34 个 / 424 条 |
+| `tests/` | 34 个 / 427 条 |
 | 对外模型 | 4 个 |
 | 图片实测 | 4 / 4 通过 |
 | 独立流式实测 | 4 / 4 通过 |
@@ -32,7 +32,7 @@
 已验证：
 
 - `node scripts/check.mjs`：45 通过 / 0 警告 / 0 失败；
-- `node --test`：424 通过 / 0 失败；
+- `node --test`：427 通过 / 0 失败；
 - `node scripts/check-ua.mjs .` 与 `check-error-codes.mjs`：0 失败；
 - `node scripts/privacy-scan.mjs`：PASS；
 - `npm pack --dry-run`：116 个文件，含 README、CHANGELOG、docs、测试与 Croli 适配层；
@@ -48,7 +48,8 @@
 - `0.1.1` 独立审查已放行，宿主已重载；`hasRefresh=true`、到期时间已落盘，今日签到/首聊均领取，邀请窗口真实可见。
 - `0.1.2` 修复 `.plugin-options.top` 与页头 `.top` 的 46px 限高冲突：仅邀请紧凑置顶，其余两项下移；当前二进制资源几何测试由重叠 114.9px 变为间距 30px。
 - `0.1.3` 默认使用 magpie 首选账号作为邀请源，真实本机默认链接与注册授权链接一致；真实邀请码只在本机缓存，不进 Git。
-- 官方 Magpie `.plugin-options.top` 的 46px 冲突已准备独立 issue 与单行 CSS 修复证据，后续按官方修复恢复多项完整置顶。
+- `0.1.5` 对照百智云 `invite-policy` 改为 `inviteSource` 下拉：默认首选、指定账号、最新账号或手动码，记住选择；`ask()` 按 uid 取码，`authorize()` 零出站，真实本机默认链接不变。
+- 官方 Magpie `.plugin-options.top` 的 46px 冲突已提交 `yetone/magpie#7353`，完整说明暂放模型下方，待上游修复后恢复多项完整置顶。
 
 ## 四、硬约束
 
