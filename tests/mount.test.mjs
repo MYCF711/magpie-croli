@@ -6,7 +6,16 @@ import { readFileSync } from "node:fs"
 import * as entry from "../index.mjs"
 
 const { CroliAuthPlugin, _internal } = entry
-const EXPECTED = ["DeepSeek-V4.1-Flash", "gpt-6-luna", "claude-opus-5.5", "grok-4.6"]
+const EXPECTED = [
+  "DeepSeek-V4.1-Flash",
+  "gpt-6-luna",
+  "gpt-6.1-sol",
+  "gpt-5.6-sol",
+  "gpt-5.6-luna",
+  "claude-opus-5.5",
+  "claude-sonnet-5",
+  "grok-4.6",
+]
 
 test("入口只导出一个插件工厂", () => {
   assert.deepEqual(Object.entries(entry).filter(([, value]) => typeof value === "function").map(([key]) => key), ["CroliAuthPlugin"])
@@ -35,7 +44,7 @@ test("九项钩子、三种登录与数据字段齐全", async () => {
   assert.equal(plugin.auth.methods[2].authorize, undefined, "API Key 应由宿主原样保存")
 })
 
-test("config 恰好声明四个模型，窗口和实测图片能力完整", async () => {
+test("config 声明完整模型表，窗口和实测图片能力完整", async () => {
   const plugin = await CroliAuthPlugin()
   const cfg = {}
   await plugin.config(cfg)
