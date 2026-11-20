@@ -15,7 +15,7 @@ DSH / 其他 OpenAI 客户端
 - `index.mjs`：只负责装配 config/auth/models/usage/checkin/chat.headers。
 - `src/croli.mjs`：网关目录、一次性导入、额度读取和请求转发。
 - `src/croli-account.mjs`：Clerk 续期、每日任务、真实对话完成上报与邀请缓存。
-- `scripts/verify-live.mjs`：只接受环境变量中的 Key，独立验证四个流式请求。
+- `scripts/verify-live.mjs`：只接受环境变量中的 Key，独立验证各模型的流式请求。
 - `scripts/verify-account.mjs`：真实签到状态、每日任务和公开邀请链接验收。
 
 ## 凭证边界
@@ -30,7 +30,7 @@ DSH / 其他 OpenAI 客户端
 
 1. `authorize()` 立即返回 `opened: true`，不等待网络。
 2. `callback()` 读取一次 Croli `auth.json` 的 Clerk access token。
-3. 用 `GET https://api.croli.net/relay/api/relay/search` 换取覆盖四个模型的 `sk`。
+3. 用 `GET https://api.croli.net/relay/api/relay/search` 换取覆盖核心模型的 `sk`（判据见 `CORE_MODEL_IDS`）。
 4. 宿主保存 `{ type: "oauth", access: <sk>, refresh: <Clerk refresh token>, expires: <ms> }`。
 5. 聊天只使用 `sk`；账户 JWT 用于积分、签到、每日任务和邀请。
 
@@ -80,7 +80,7 @@ DSH / 其他 OpenAI 客户端
 | `claude-opus-5.5` | `group/auto-claude-opus-5-5`，响应头另标 OpenRouter Claude Opus 5.5 | 1,000,000 | 128,000 |
 | `grok-4.6` | `x-ai/grok-4.6` | 500,000 | 450,000 |
 
-上下文与输出上限来自上游实时目录和官方文档，不是脚手架占位值。四个模型都实际识别了测试图中的 `MAGPIE`，因此显式声明 `capabilities.input.image: true`。
+上下文与输出上限来自上游实时目录和官方文档，不是脚手架占位值。已实测的模型都识别了测试图中的 `MAGPIE`，因此显式声明 `capabilities.input.image: true`；新增的四项（`gpt-6.1-sol` / `gpt-5.6-sol` / `gpt-5.6-luna` / `claude-sonnet-5`）只实测了文本，窗口字段见上表注释。
 
 ## 错误分类
 
@@ -106,11 +106,11 @@ CROLI_GATEWAY_KEY=<GATEWAY_KEY> CROLI_AUTH_FILE=<MISSING_FILE> node scripts/veri
 
 验证结果保存在 `verification/live-results.json`（本机证据，不进仓库）：
 
-- 四个模型目录全部存在。
-- 四个流式请求均为 HTTP 200。
-- 四个答案都包含各自随机标识。
-- 四个响应都有 `[DONE]` 和 usage。
-- 四个实际上游模型标识与逆向结果一致。
+- 各模型目录全部存在。
+- 各模型流式请求均为 HTTP 200。
+- 各答案都包含各自随机标识。
+- 各响应都有 `[DONE]` 和 usage。
+- 各实际上游模型标识与逆向结果一致。
 
 图片证据见上级分析目录 `analysis/vision-probes.json`。
 
