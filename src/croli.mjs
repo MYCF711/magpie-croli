@@ -14,15 +14,20 @@ export const RELAY_SEARCH = "https://api.croli.net/relay/api/relay/search"
 export const CREDITS_BALANCE = "https://ds.croli.net/credits/v1/account/balance"
 
 /**
- * 账号可用性判据：这几个人人都有。
- * 登录时按它们判定 Key 是否可用；其余规格只参与排序 ——
- * 上游增减模型不会再把一次正常的登录误判成失败。
+ * 账号可用性判据：登录时只要求中转资源覆盖这几个。
+ *
+ * 其余规格只参与排序 —— 上游增减模型不会再把一次正常的登录误判成失败。
+ *
+ * ⚠ `grok-4.6` **不在这里**：2026-11-20 实测它既不在 `GET /v1/models`
+ * 的返回里，直连也只会拿到 `503 No available channel for model grok-4.6
+ * under group default`。把「当前完全不可服务」的模型放进核心判据，
+ * 等于把登录的成败挂在一个随时会被上游删掉的名字上 —— 正是这条判据要消灭的脆性。
+ * 它仍留在 `MODEL_SPECS` 里参与排序，活目录会按 `/v1/models` 自动把它过滤掉。
  */
 export const CORE_MODEL_IDS = Object.freeze([
   "DeepSeek-V4.1-Flash",
   "gpt-6-luna",
   "claude-opus-5.5",
-  "grok-4.6",
 ])
 
 // context / output / efforts 目前只作文档用途（代码只读 id 与 name）。

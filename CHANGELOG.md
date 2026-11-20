@@ -1,5 +1,18 @@
 # 更新记录
 
+## 0.1.7 — 2026-11-21
+
+**核心判据去掉不可服务的 `grok-4.6`；模型数量文案改为不写死**
+
+- `CORE_MODEL_IDS` 从 4 条降到 3 条（`DeepSeek-V4.1-Flash` / `gpt-6-luna` / `claude-opus-5.5`）。
+  实测 `grok-4.6` 既不在 `GET /v1/models` 返回里，直连也只会回
+  `503 No available channel for model grok-4.6 under group default` ——
+  把当前完全不可服务的模型放进登录判据，等于让登录成败依赖一个随时会被上游删掉的名字。
+  它仍留在 `MODEL_SPECS` 里参与排序，活目录会按 `/v1/models` 自动过滤掉。
+- `package.json` 的 `description` 与 `docs/internals.md` 里「四个模型」的旧说法改为不写死数量，
+  并补上新增四项只实测了文本、窗口字段是文档值。
+- 版本 0.1.6 → 0.1.7。
+
 ## 0.1.6 — 2026-11-21
 
 **按账号实际资源补齐模型；登录判据改用核心模型**
