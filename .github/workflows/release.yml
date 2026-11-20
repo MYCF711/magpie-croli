@@ -123,6 +123,8 @@ jobs:
           fi
 
   npm:
+    # 默认只发 GitHub 源码与 Release；只有仓库明确设置 PUBLISH_NPM=true 才发 npm。
+    if: vars.PUBLISH_NPM == 'true'
     runs-on: ubuntu-latest
     needs: release
     steps:

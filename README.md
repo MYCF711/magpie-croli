@@ -57,7 +57,7 @@
 
 ## 安装
 
-源码托管于 [MYCF711/magpie-croli](https://github.com/MYCF711/magpie-croli)，未发布 npm 包或 GitHub Release。
+源码与版本 Release 托管于 [MYCF711/magpie-croli](https://github.com/MYCF711/magpie-croli)，未发布 npm 包。
 
 ```bash
 magpie plugin add github:MYCF711/magpie-croli

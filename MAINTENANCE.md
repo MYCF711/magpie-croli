@@ -9,7 +9,7 @@
 | 插件 | `magpie-croli` |
 | 显示名 | `Croli 免费模型 Croli Free Models` |
 | provider | `croli` |
-| 当前版本 | `0.1.3`（GitHub 源码交付，未发 npm / Release） |
+| 当前版本 | `0.1.4`（GitHub 源码与 Release，未发 npm） |
 | 上游脚手架 | `MYCF711/magpie-plugin-scaffold` v0.3.14 / `d4c7a5014f64f3582b92a9a3e543949b57c6e96c` |
 | 定位 | 四模型原生 API Key 直通，脱离 Croli 客户端，零客户端提示词注入 |
 
@@ -17,8 +17,8 @@
 
 ```text
 分支        main（GitHub MYCF711/magpie-croli 首发）
-版本        0.1.3
-发布状态    GitHub 源码托管；无 npm、无 GitHub Release
+版本        0.1.4
+发布状态    GitHub 源码与 Release；无 npm
 ```
 
 | 资产 | 数量 |

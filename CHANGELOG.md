@@ -1,5 +1,14 @@
 # 更新记录
 
+## 0.1.4 — 2026-11-20
+
+**GitHub 公开发布与发布门禁**
+
+- 源码公开到 `MYCF711/magpie-croli`；真实邀请码、账户 ID、token 和本机验证目录均未进入仓库。
+- Release workflow 的 npm 步骤改为只有仓库变量 `PUBLISH_NPM=true` 时才执行，默认只发 GitHub 源码与 Release，避免意外发布 npm。
+- 更新 `ossf/scorecard-action` 到 `v2.6.0`；Action 主版本检查通过。
+- 424 项测试、45 项脚手架检查、文档、脱敏、116 文件打包与独立邀请审查全部通过。
+
 ## 0.1.3 — 2026-11-20
 
 **首选邀请源与公开发布准备**
