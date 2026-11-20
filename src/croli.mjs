@@ -13,10 +13,28 @@ export const BASE = "https://ds.croli.net/v1"
 export const RELAY_SEARCH = "https://api.croli.net/relay/api/relay/search"
 export const CREDITS_BALANCE = "https://ds.croli.net/credits/v1/account/balance"
 
+/**
+ * 账号可用性判据：这几个人人都有。
+ * 登录时按它们判定 Key 是否可用；其余规格只参与排序 ——
+ * 上游增减模型不会再把一次正常的登录误判成失败。
+ */
+export const CORE_MODEL_IDS = Object.freeze([
+  "DeepSeek-V4.1-Flash",
+  "gpt-6-luna",
+  "claude-opus-5.5",
+  "grok-4.6",
+])
+
+// context / output / efforts 目前只作文档用途（代码只读 id 与 name）。
+// 新增几项的上游窗口未公布，先按同族口径填写，实测后再订正。
 export const MODEL_SPECS = Object.freeze([
   { id: "DeepSeek-V4.1-Flash", name: "DeepSeek V4.1 Flash", context: 1_048_576, output: 384_000, efforts: ["low", "medium", "high"] },
   { id: "gpt-6-luna", name: "GPT-6 Luna", context: 1_050_000, output: 128_000, efforts: ["low", "medium", "high"] },
+  { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", context: 1_050_000, output: 128_000, efforts: ["low", "medium", "high"] },
+  { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", context: 1_000_000, output: 128_000, efforts: ["low", "medium", "high"] },
+  { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", context: 1_000_000, output: 128_000, efforts: ["low", "medium", "high"] },
   { id: "claude-opus-5.5", name: "Claude Opus 5.5", context: 1_000_000, output: 128_000, efforts: ["low", "medium", "high"] },
+  { id: "claude-sonnet-5", name: "Claude Sonnet 5", context: 1_000_000, output: 128_000, efforts: ["low", "medium", "high"] },
   { id: "grok-4.6", name: "Grok 4.6", context: 500_000, output: 450_000, efforts: ["low", "medium", "high"] },
 ])
 
@@ -97,10 +115,11 @@ export async function exchangeRelayKey(jwt, { fetchImpl = fetch } = {}) {
     const endpoint = String(resource?.url ?? resource?.endpoint ?? "").replace(/\/+$/, "")
     const models = Array.isArray(resource?.models) ? resource.models : []
     const matches = MODEL_SPECS.filter((spec) => models.includes(spec.id)).length
-    return { resource, key, endpoint, matches }
-  }).filter((item) => item.key && item.endpoint === BASE && item.matches === MODEL_SPECS.length)
+    const coreMatches = CORE_MODEL_IDS.filter((id) => models.includes(id)).length
+    return { resource, key, endpoint, matches, coreMatches }
+  }).filter((item) => item.key && item.endpoint === BASE && item.coreMatches === CORE_MODEL_IDS.length)
     .sort((a, b) => b.matches - a.matches)
-  if (!candidates.length) throw fail("免费资源中没有四个目标模型共用的 Croli 网关 Key", 404, CODES.modelNotFound)
+  if (!candidates.length) throw fail("免费资源中没有可用的 Croli 网关 Key（缺核心模型）", 404, CODES.modelNotFound)
   const selected = candidates[0]
   return { key: selected.key, endpoint: selected.endpoint, matchedModels: selected.matches }
 }

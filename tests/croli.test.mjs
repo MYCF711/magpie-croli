@@ -131,7 +131,7 @@ test("live 缺少目标模型时不从静态表补回", async () => {
   assert.deepEqual(models.map((model) => model.id), ["grok-4.6"])
 })
 
-test("relay 选择覆盖四个模型的网关 Key", async () => {
+test("relay 选择覆盖核心模型的网关 Key", async () => {
   const result = await exchangeRelayKey(fakeJwt({ sub: "user_test" }), {
     fetchImpl: async (url) => {
       assert.equal(url, RELAY_SEARCH)
@@ -142,13 +142,13 @@ test("relay 选择覆盖四个模型的网关 Key", async () => {
     },
   })
   assert.equal(result.key, "csk_four")
-  assert.equal(result.matchedModels, 4)
+  assert.equal(result.matchedModels, MODEL_SPECS.length)
   await assert.rejects(() => exchangeRelayKey(fakeJwt(), {
     fetchImpl: async () => json({ resources: [{ url: "https://other.invalid/v1", sk: "csk_bad", models: ["grok-4.6"] }] }),
-  }), /没有四个目标模型/)
+  }), /没有可用的 Croli 网关 Key/)
   await assert.rejects(() => exchangeRelayKey(fakeJwt(), {
     fetchImpl: async () => json({ resources: [{ url: BASE, sk: "csk_partial", models: ["grok-4.6"] }] }),
-  }), /没有四个目标模型/)
+  }), /没有可用的 Croli 网关 Key/)
 })
 
 test("一次性导入只依赖临时 auth 文件，返回独立 Key 与账号 metadata", async () => {
