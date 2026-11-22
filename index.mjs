@@ -46,13 +46,14 @@ function staticModels() {
       // 免费试用用完后会进入积分计费，不能标 free:true 让 Free first 反复派发。
       free: false,
       limit: { context: spec.context, output: spec.output },
-      modalities: { input: ["text", "image"], output: ["text"] },
+      // spec.vision === false：只实测过文本（或图片请求失败）的模型不声明图片输入
+      modalities: { input: spec.vision === false ? ["text"] : ["text", "image"], output: ["text"] },
       capabilities: {
         temperature: true,
         reasoning: true,
         toolcall: true,
-        attachment: true,
-        input: { text: true, image: true, audio: false, video: false, pdf: false },
+        attachment: spec.vision !== false,
+        input: { text: true, image: spec.vision !== false, audio: false, video: false, pdf: false },
         output: { text: true },
       },
       variants: Object.fromEntries(spec.efforts.map((effort) => [effort, {}])),

@@ -15,7 +15,10 @@ const EXPECTED = [
   "claude-opus-5.5",
   "claude-sonnet-5",
   "grok-4.6",
+  "gemini-4-argon",
 ]
+// 只实测过文本的模型：不声明图片输入（spec.vision === false）
+const TEXT_ONLY = new Set(_internal.MODELS.filter((spec) => spec.vision === false).map((spec) => spec.id))
 
 test("入口只导出一个插件工厂", () => {
   assert.deepEqual(Object.entries(entry).filter(([, value]) => typeof value === "function").map(([key]) => key), ["CroliAuthPlugin"])
@@ -56,17 +59,29 @@ test("config 声明完整模型表，窗口和实测图片能力完整", async (
     assert.equal(model.api.npm, "@ai-sdk/openai-compatible")
     assert.notEqual(model.free, true)
     assert.ok(model.limit.context >= 500_000)
-    assert.ok(model.limit.output >= 128_000)
-    assert.deepEqual(model.modalities.input, ["text", "image"])
+    assert.ok(model.limit.output >= 64_000)
+    const vision = !TEXT_ONLY.has(id)
+    assert.deepEqual(model.modalities.input, vision ? ["text", "image"] : ["text"])
     assert.deepEqual(model.modalities.output, ["text"])
-    assert.equal(model.capabilities.attachment, true)
+    assert.equal(model.capabilities.attachment, vision)
     assert.equal(model.capabilities.toolcall, true)
     assert.equal(model.capabilities.reasoning, true)
     for (const key of ["text", "image", "audio", "video", "pdf"]) {
       assert.equal(typeof model.capabilities.input[key], "boolean")
     }
-    assert.equal(model.capabilities.input.image, true)
+    assert.equal(model.capabilities.input.image, vision)
   }
+})
+
+test("gemini-4-argon 只声明文本输入，其余模型保持图片能力", async () => {
+  const plugin = await CroliAuthPlugin()
+  const cfg = {}
+  await plugin.config(cfg)
+  const models = cfg.provider.croli.models
+  assert.deepEqual([...TEXT_ONLY], ["gemini-4-argon"])
+  assert.equal(models["gemini-4-argon"].capabilities.input.image, false)
+  assert.equal(models["gemini-4-argon"].limit.context, 1_048_576)
+  assert.equal(models["claude-opus-5.5"].capabilities.input.image, true)
 })
 
 test("一次性导入的 authorize 立即返回且不打开浏览器", async () => {

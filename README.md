@@ -38,6 +38,7 @@
 | OpenAI | `gpt-6-luna` | 1,050,000 | 128,000 | ✓ / ✓ |
 | Anthropic | `claude-opus-5.5` | 1,000,000 | 128,000 | ✓ / ✓ |
 | xAI | `grok-4.6` | 500,000 | 450,000 | ✓ / ✓ |
+| Google | `gemini-4-argon` | 1,048,576 | 65,536 | ✓ / ✗（带图请求网关 502，只声明文本） |
 
 声明 `low / medium / high` 思考档；调用方也可以直接传原生 `reasoning_effort`。试用额度用完后可能消耗 Croli 积分，因此插件不会把这些模型误标成永久免费。
 
@@ -65,7 +66,7 @@ magpie plugin add github:MYCF711/magpie-croli
 
 然后三选一：
 
-1. **一次性导入**：在 Croli 供应商卡片选择「从本机 Croli 登录态导入 API Key」。导入只发生一次，之后不再读取客户端。
+1. **一次性导入**：在 Croli 供应商卡片选择「从本机 Croli 登录态导入 API Key」。导入只发生一次，之后不再读取客户端。登录态按 `CROLI_AUTH_FILE` → `%APPDATA%/croli/auth.json`（Windows）→ `~/Library/Application Support/Croli/auth.json`（macOS）→ `~/.config/croli/auth.json` 的顺序查找。
 2. **邀请注册**：选择「使用邀请链接注册并导入」，在 `inviteSource` 下拉中选择最新账号、指定账号或手动邀请码；默认首选账号并记住选择，仅新注册账号有效。
 3. **手动粘贴**：选择「Croli 网关 API Key」，粘贴 `csk_...`。
 

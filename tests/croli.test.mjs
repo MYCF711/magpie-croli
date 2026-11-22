@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { mkdtemp, writeFile, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { CroliAuthPlugin } from "../index.mjs"
@@ -16,6 +16,7 @@ import {
   exchangeRelayKey,
   importDesktopKey,
   fetchCredits,
+  defaultCroliAuthFiles,
 } from "../src/croli.mjs"
 
 const auth = { type: "api", key: "csk_test" }
@@ -243,4 +244,23 @@ test("积分读取失败时仍保留邀请窗口，不改写到 user 字段", as
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test("macOS 上默认登录态路径包含 ~/Library/Application Support/Croli/auth.json，且排在 ~/.config 之前", () => {
+  const files = defaultCroliAuthFiles({}, "darwin")
+  const mac = join(homedir(), "Library", "Application Support", "Croli", "auth.json")
+  const xdg = join(homedir(), ".config", "croli", "auth.json")
+  assert.ok(files.includes(mac))
+  assert.ok(files.indexOf(mac) < files.indexOf(xdg))
+})
+
+test("非 macOS 不加 Library 路径；CROLI_AUTH_FILE 仍然优先且唯一", () => {
+  assert.ok(!defaultCroliAuthFiles({}, "linux").some((file) => file.includes("Application Support")))
+  assert.deepEqual(defaultCroliAuthFiles({ CROLI_AUTH_FILE: "/x/auth.json" }, "darwin"), ["/x/auth.json"])
+})
+
+test("live 目录带上 gemini-4-argon，但不带实测不可用的 fable / deepseek 变体", async () => {
+  const rows = ["claude-fable-5-2", "deepseek-v4.1-flash", "deepseek-v4-flash", "gemini-4-argon", "claude-opus-5.5"].map((id) => ({ id }))
+  const models = await fetchLiveModels(auth, { fetchImpl: async () => json({ data: rows }) })
+  assert.deepEqual(models.map((model) => model.id).sort(), ["claude-opus-5.5", "gemini-4-argon"])
 })
