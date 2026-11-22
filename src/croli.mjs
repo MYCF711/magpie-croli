@@ -41,6 +41,12 @@ export const MODEL_SPECS = Object.freeze([
   { id: "claude-opus-5.5", name: "Claude Opus 5.5", context: 1_000_000, output: 128_000, efforts: ["low", "medium", "high"] },
   { id: "claude-sonnet-5", name: "Claude Sonnet 5", context: 1_000_000, output: 128_000, efforts: ["low", "medium", "high"] },
   { id: "grok-4.6", name: "Grok 4.6", context: 500_000, output: 450_000, efforts: ["low", "medium", "high"] },
+  // 2026-11-22 实测：`GET /v1/models` 返回 gemini-4-argon，文本调用 200（上游回显 windsurf/gemini-4-argon-high）；
+  // 带图请求网关连续两次 502 Bad gateway，所以 `vision: false`（只声明文本输入）。
+  // 窗口取 magpie 模型库同名条目（1,048,576 / 65,536）。
+  // 同一份 /v1/models 里的 claude-fable-5-2、deepseek-v4-flash（400：不含在上游 OpenCode Go 渠道）、
+  // deepseek-v4.1-flash 小写（400：区域限制）实测不可用，故意不加；活目录按 MODEL_SPECS 过滤，自然排除。
+  { id: "gemini-4-argon", name: "Gemini 4 Argon", context: 1_048_576, output: 65_536, efforts: ["low", "medium", "high"], vision: false },
 ])
 
 function fail(message, status, code) {
@@ -138,10 +144,13 @@ function jwtPayload(token) {
   }
 }
 
-export function defaultCroliAuthFiles(env = process.env) {
+export function defaultCroliAuthFiles(env = process.env, platform = process.platform) {
   if (env.CROLI_AUTH_FILE) return [env.CROLI_AUTH_FILE]
   const files = []
   if (env.APPDATA) files.push(join(env.APPDATA, "croli", "auth.json"))
+  // macOS 桌面版把登录态写在 ~/Library/Application Support/Croli/auth.json（Electron userData），
+  // 不在 ~/.config/croli —— 不补这一条，Mac 上「从本机 Croli 登录态导入」必报 auth.json 不存在。
+  if (platform === "darwin") files.push(join(homedir(), "Library", "Application Support", "Croli", "auth.json"))
   files.push(join(homedir(), ".config", "croli", "auth.json"))
   return [...new Set(files)]
 }

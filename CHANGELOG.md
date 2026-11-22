@@ -1,5 +1,24 @@
 # 更新记录
 
+## 0.1.8 — 2026-11-22
+
+**补上实测可用的 `gemini-4-argon`；macOS 一次性导入能找到桌面版登录态**
+
+- `MODEL_SPECS` 新增 `gemini-4-argon`（窗口 1,048,576 / 输出 65,536，取 magpie 模型库同名条目）。
+  2026-11-22 实测：`GET /v1/models` 返回它，文本请求 HTTP 200（上游回显 `windsurf/gemini-4-argon-high`）；
+  0.1.6 记的「超时」已不复现。带图请求网关连续两次 `502 Bad gateway`，所以标 `vision: false`。
+- `staticModels()` 读 `spec.vision === false`：这类模型 `modalities.input` 只写 `["text"]`，
+  `capabilities.attachment` / `input.image` 为 `false`，不让宿主把图片派给它。其余模型不变。
+- 同一份 `/v1/models` 里另外三条实测仍不可用，**故意不加**：`claude-fable-5-2` 与 `deepseek-v4-flash`
+  回 400「isn't included in OpenCode Go」，小写 `deepseek-v4.1-flash` 回 400 区域限制。
+  桌面版展示的 `claude-sonnet-5.5` / `claude-haiku-5.5` / `gpt-6.1-terra` / `gpt-6-sol` 在网关回
+  `503 No available channel ... under group default`，`gpt-6-astra` 回「价格尚未配置」。
+- `defaultCroliAuthFiles(env, platform)`：macOS 上补 `~/Library/Application Support/Croli/auth.json`
+  （Electron userData），排在 `~/.config/croli/auth.json` 之前。原先 Mac 上「从本机 Croli 登录态导入」
+  必报 auth.json 不存在。`platform` 参数默认 `process.platform`，便于测试。
+- 新增测试：macOS / 非 macOS 路径、`CROLI_AUTH_FILE` 优先、`gemini-4-argon` 只声明文本、活目录不带入不可用变体。
+- 版本 0.1.7 → 0.1.8。
+
 ## 0.1.7 — 2026-11-21
 
 **核心判据去掉不可服务的 `grok-4.6`；模型数量文案改为不写死**

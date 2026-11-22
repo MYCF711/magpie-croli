@@ -79,8 +79,9 @@ DSH / 其他 OpenAI 客户端
 | `gpt-6-luna` | `gpt-6-luna` | 1,050,000 | 128,000 |
 | `claude-opus-5.5` | `group/auto-claude-opus-5-5`，响应头另标 OpenRouter Claude Opus 5.5 | 1,000,000 | 128,000 |
 | `grok-4.6` | `x-ai/grok-4.6` | 500,000 | 450,000 |
+| `gemini-4-argon` | `windsurf/gemini-4-argon-high` | 1,048,576 | 65,536 |
 
-上下文与输出上限来自上游实时目录和官方文档，不是脚手架占位值。已实测的模型都识别了测试图中的 `MAGPIE`，因此显式声明 `capabilities.input.image: true`；新增的四项（`gpt-6.1-sol` / `gpt-5.6-sol` / `gpt-5.6-luna` / `claude-sonnet-5`）只实测了文本，窗口字段见上表注释。
+上下文与输出上限来自上游实时目录和官方文档，不是脚手架占位值。已实测的模型都识别了测试图中的 `MAGPIE`，因此显式声明 `capabilities.input.image: true`；新增的四项（`gpt-6.1-sol` / `gpt-5.6-sol` / `gpt-5.6-luna` / `claude-sonnet-5`）只实测了文本，窗口字段见上表注释。`gemini-4-argon`（0.1.8）文本实测 200，带图请求网关连续 502，因此在 `MODEL_SPECS` 里标 `vision: false`，`staticModels()` 据此只声明文本输入。
 
 ## 错误分类
 
