@@ -5,6 +5,7 @@ import { createUsageCache } from "./src/usage-cache.mjs"
 import { createRefreshLock } from "./src/refresh-lock.mjs"
 import { uidOf } from "./src/credential.mjs"
 import { OFFICIAL_UA } from "./src/http.mjs"
+import { DESKTOP_MODEL_IDS, discoverDesktopProxy } from "./src/croli-desktop-proxy.mjs"
 import {
   refreshAccount,
   checkinToday,
@@ -26,6 +27,7 @@ import {
   gatewayKeyOf,
   forwardRequest,
   importDesktopKey,
+  synchronizeDesktopAuth,
   fetchLiveModels,
   fetchCredits,
 } from "./src/croli.mjs"
@@ -65,6 +67,7 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
   const usageCache = createUsageCache({ ttlMs: 60_000, failTtlMs: 60_000 })
   const refreshLock = createRefreshLock()
   const checkinLock = createRefreshLock({ replayMs: 0 })
+  const desktopProxy = _options.desktopProxy || discoverDesktopProxy
   const option = (key, fallback) => {
     try {
       const value = _ctx?.magpie?.option?.(PROVIDER, key)
@@ -143,7 +146,7 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
   }
   const importDesktopResult = async () => {
     try {
-      const imported = await importDesktopKey()
+      const imported = await importDesktopKey({ desktopProxy })
       return {
         type: "success",
         access: imported.key,
@@ -262,7 +265,7 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
       // ③ 聊天仍用网关 Key；账户 JWT 由 Clerk 公共客户端续期，同账号 single-flight。
       async refresh(auth) {
         if (!auth || auth.type === "api") return undefined
-        return refreshLock.run(`${PROVIDER}\n${auth.refresh || uidOf(auth)}`, () => refreshAccount(auth))
+        return refreshLock.run(`${PROVIDER}\n${auth.refresh || uidOf(auth)}`, () => refreshAccount(auth, { desktopProxy }))
       },
 
       // ④ OpenAI 兼容请求直通。Response/SSE 不读流，交给 magpie。
@@ -275,9 +278,10 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
           apiKey: key,
           headers: { "user-agent": OFFICIAL_UA },
           async fetch(input, init) {
-            const fresh = await getAuth()
+            const fresh = await synchronizeDesktopAuth(await getAuth())
             const response = await forwardRequest(input, init, fresh, {
               includeUsage: option("stream-usage", true),
+              desktopProxy,
             })
             if (!option("auto-checkin", true) || !fresh?.metadata?.croliAccessToken) return response
             let model = ""
@@ -296,7 +300,7 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
 
       // ⑤ 额度与邀请分独立读取：任一失败都不影响聊天，也不伪造额度。
       async usage(getAuth) {
-        const auth = await getAuth()
+        const auth = await synchronizeDesktopAuth(await getAuth())
         if (!auth || !gatewayKeyOf(auth)) return { error: "未登录", windows: [] }
         if (!auth.metadata?.croliAccessToken) {
           return { error: "API Key 模式不读取客户端额度与邀请；模型调用不受影响", windows: [] }
@@ -349,7 +353,7 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
 
       // ⑥ magpie 按北京时间每日调用；重复签到幂等，邀请链接随结果展示。
       async checkin(getAuth) {
-        const auth = await getAuth()
+        const auth = await synchronizeDesktopAuth(await getAuth())
         if (!auth?.metadata?.croliAccessToken) return { outcome: "ineligible", message: "纯 API Key 没有签到凭证，请重新一次性导入" }
         if (!option("auto-checkin", true)) return { outcome: "inactive", message: "自动签到已关闭" }
         const key = String(uidOf(auth))
@@ -380,6 +384,9 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
         const fallback = staticModels()
         if (!gatewayKeyOf(auth)) return fallback
         try {
+          if (auth?.metadata?.kind === "croli-desktop-proxy" || await desktopProxy(auth)) {
+            return Object.fromEntries(DESKTOP_MODEL_IDS.map(id => [id, fallback[id]]))
+          }
           const live = await fetchLiveModels(auth)
           const out = {}
           for (const model of live) out[model.id] = { ...fallback[model.id], ...model }

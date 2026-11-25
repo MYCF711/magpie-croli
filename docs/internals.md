@@ -1,5 +1,22 @@
 # Croli 插件实现与验证
 
+## Croli 0.0.19 桌面兼容
+
+新版免费网关要求设备授权，旧 Key 直接请求 `/v1/models` 和聊天端点均返回升级提示 403。
+`src/croli-desktop-proxy.mjs` 在 macOS Apple Silicon 上读取官方 Croli 服务器的进程树，严格限定其 Node 子进程，从 `CODEX_CONFIG.model_provider` 指定的供应商解析 `/r/<route>/v1` 回环代理，以及 `CROLI_FREE_CODEX_KEY` 临时凭据。供应商名称可能为 `croli` 或客户端恢复后的其他名称，但 env_key、回环地址和路由形状必须匹配。只有账号的稳定 uid 与本机 `auth.json` 的 sub 相同才启用；还核对服务器的 `CROLI_DATA_DIR`，不扫描其他应用的进程环境。
+
+插件不读取设备私钥、不实现或伪造设备签名、不新建设备或会话。请求仍保持调用方 messages/tools，去掉调用方的 `x-croli-*` 头，由官方 HTTP 代理负责授权。代理地址与临时凭据不落盘、不打印；官方客户端重启后重新发现。代理 POST 失败后不自动重放到另一条路径，避免重复计费或工具调用。
+
+限制：必须保持官方 Croli 与至少一个免费 Codex 会话运行；仅使用同账号。若官方客户端自己无法验证登录，须先完成官方重新登录。纯 API Key 和不同账号仍走原直通路径。当前桌面模型表是 2026-11-25 六模型文本实测快照，非实时权限目录；代理不支持 `/models`，因此不调用该端点。旧 `gpt-6-luna` 和 `grok-4.6` 的无通道响应不会被补回桌面目录。
+
+桌面首次导入与旧账号续期均可切换到 `croli-desktop-proxy` 模式：保存无鉴权能力的标记，不保存临时代理 token，清除插件持有的 refresh token，`expires:0` 避免与官方客户端争用一次性令牌。账号仍由官方客户端维护。代理缺失返回 503 并保留登录，不把标记发送到旧公网端点；旧 API Key 模式不改变。
+
+积分、签到、真实对话任务在调用前只读取同账号最新的本机 access token，不发起 refresh，不修改官方登录文件。已独立验证官方重新登录后积分接口恢复，插件可显示余额和免费额度；实际 Opus 回复成功，上游月请求限额与 Croli 积分余额是两种限制，余额充足不保证某条上游通道可用。
+
+上游部分模型在 `stream:false` 时仍返回 SSE；桌面路径复用 `foldOpenAI` 还原 Chat Completions JSON，包含文本、工具调用和 usage。只在明确非流式 Chat Completions 时读流；流式保持原 Response。缺少终止原因的截断流返回 504。
+
+以下章节中独立 Key、无客户端依赖的说明仅适用于旧直通路径。
+
 ## 架构
 
 ```text
