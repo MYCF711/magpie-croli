@@ -7,6 +7,8 @@ import { rawCredentialOf } from "./credential.mjs"
 import { CODES, OFFICIAL_UA, errorResponse, errorText, readBody } from "./http.mjs"
 import { ensureStreamUsage, rewriteJsonBody, stripModelPrefix } from "./request-rewrite.mjs"
 import { rewriteRefusal } from "./status.mjs"
+import { foldOpenAI, openAIEvents } from "./openai-sse.mjs"
+import { discoverDesktopProxy } from "./croli-desktop-proxy.mjs"
 
 export const PROVIDER = "croli"
 export const BASE = "https://ds.croli.net/v1"
@@ -142,11 +144,25 @@ export function defaultCroliAuthFiles(env = process.env) {
   if (env.CROLI_AUTH_FILE) return [env.CROLI_AUTH_FILE]
   const files = []
   if (env.APPDATA) files.push(join(env.APPDATA, "croli", "auth.json"))
+  if (process.platform === "darwin") files.push(join(homedir(), "Library", "Application Support", "Croli", "auth.json"))
   files.push(join(homedir(), ".config", "croli", "auth.json"))
   return [...new Set(files)]
 }
 
-export async function importDesktopKey({ authFile, fetchImpl = fetch, env = process.env } = {}) {
+export async function synchronizeDesktopAuth(auth, { env = process.env } = {}) {
+  if (auth?.metadata?.kind !== "croli-desktop-proxy") return auth
+  for (const file of defaultCroliAuthFiles(env)) {
+    try {
+      const document = JSON.parse(await readFile(file, "utf8"))
+      const payload = jwtPayload(document.access_token)
+      if (!payload.sub || payload.sub !== (auth.metadata.userId || auth.uid) || !Number.isFinite(payload.exp)) continue
+      return { ...auth, metadata: { ...auth.metadata, croliAccessToken: document.access_token, croliExpiresAt: new Date(payload.exp * 1000).toISOString() } }
+    } catch {}
+  }
+  return auth
+}
+
+export async function importDesktopKey({ authFile, fetchImpl = fetch, env = process.env, desktopProxy = discoverDesktopProxy } = {}) {
   const files = authFile ? [authFile] : defaultCroliAuthFiles(env)
   let document
   let source
@@ -161,17 +177,19 @@ export async function importDesktopKey({ authFile, fetchImpl = fetch, env = proc
     }
   }
   if (!document) throw fail(`没有读到 Croli 登录态：${lastError?.message ?? "auth.json 不存在"}`, 401, CODES.signInRequired)
-  const exchanged = await exchangeRelayKey(document.access_token, { fetchImpl })
   const payload = jwtPayload(document.access_token)
+  const uid = String(payload.sub || "")
+  const proxy = uid && await desktopProxy({ type: "oauth", metadata: { userId: uid } }, { authFile: source })
+  const exchanged = proxy ? { key: "croli-desktop-proxy", endpoint: BASE } : await exchangeRelayKey(document.access_token, { fetchImpl })
   const expiresAt = Number(document.expires_at) > 0 ? Number(document.expires_at) * 1000 : Number(payload.exp) > 0 ? Number(payload.exp) * 1000 : 0
   return {
     ...exchanged,
-    uid: String(payload.sub || ""),
-    refreshToken: cleanSecret(document.refresh_token),
-    expiresAt,
+    uid,
+    refreshToken: proxy ? "" : cleanSecret(document.refresh_token),
+    expiresAt: proxy ? 0 : expiresAt,
     metadata: {
-      kind: "croli-gateway-key",
-      userId: String(payload.sub || ""),
+      kind: proxy ? "croli-desktop-proxy" : "croli-gateway-key",
+      userId: uid,
       croliAccessToken: document.access_token,
       ...(expiresAt ? { croliExpiresAt: new Date(expiresAt).toISOString() } : {}),
     },
@@ -214,7 +232,7 @@ function gatewayUrl(input) {
 }
 
 /** 只改鉴权、模型前缀和 stream usage；messages/system/tools 保持原样。 */
-export async function forwardRequest(input, init, auth, { fetchImpl = fetch, includeUsage = true } = {}) {
+export async function forwardRequest(input, init, auth, { fetchImpl = fetch, includeUsage = true, desktopProxy } = {}) {
   let key
   let url
   try {
@@ -224,11 +242,17 @@ export async function forwardRequest(input, init, auth, { fetchImpl = fetch, inc
     return errorResponse(error.message, error.status || 400, error.code || CODES.invalidRequest)
   }
 
+  const proxy = desktopProxy ? await desktopProxy(auth) : null
+  if (!proxy && auth?.metadata?.kind === "croli-desktop-proxy") {
+    return errorResponse("Croli 本机代理不可用，请打开同账号的免费 Codex 会话后重试", 503, CODES.upstreamUnavailable, { signIn: "kept" })
+  }
+  if (proxy) url = `${proxy.baseURL}${new URL(url).pathname.slice(new URL(BASE).pathname.length)}${new URL(url).search}`
   const request = input instanceof Request ? input : null
   const incoming = new Headers(init?.headers ?? request?.headers ?? {})
-  const headers = { authorization: `Bearer ${key}`, "user-agent": OFFICIAL_UA }
+  const headers = { authorization: `Bearer ${proxy?.token || key}`, "user-agent": OFFICIAL_UA }
   for (const [name, value] of incoming) {
     const lower = name.toLowerCase()
+    if (lower.startsWith("x-croli-")) continue
     if (["authorization", "x-api-key", "x-goog-api-key", "host", "content-length", "content-encoding", "user-agent"].includes(lower)) continue
     headers[name] = value
   }
@@ -248,6 +272,30 @@ export async function forwardRequest(input, init, auth, { fetchImpl = fetch, inc
       signal: init?.signal ?? request?.signal ?? AbortSignal.timeout(300_000),
       redirect: "error",
     })
+    if (proxy && response.status === 401 && (await response.clone().text()).trim() === "invalid proxy token") {
+      return errorResponse("Croli 本机代理凭据已轮换，请保持免费 Codex 会话运行后重试", 503, CODES.upstreamUnavailable, { signIn: "kept" })
+    }
+    if (proxy && response.ok && response.headers.get("content-type")?.includes("text/event-stream")) {
+      let nonStream = false
+      try { nonStream = JSON.parse(body).stream === false && new URL(url).pathname.endsWith("/chat/completions") } catch {}
+      if (nonStream) {
+        let complete = false
+        const events = (async function* () {
+          for await (const event of openAIEvents(response, { signal: init?.signal })) {
+            if (event.error) throw fail(errorText(event) || "Croli 流式响应包含错误", 503, CODES.upstreamUnavailable)
+            if (event.choices?.some(choice => choice.finish_reason != null)) complete = true
+            yield event
+          }
+        })()
+        const completion = await foldOpenAI(events)
+        if (!complete) return errorResponse("Croli 流式响应在完成前中断", 504, CODES.upstreamTimeout)
+        const responseHeaders = new Headers(response.headers)
+        responseHeaders.set("content-type", "application/json")
+        responseHeaders.delete("content-length")
+        responseHeaders.delete("content-encoding")
+        return new Response(JSON.stringify(completion), { status: response.status, headers: responseHeaders })
+      }
+    }
     return rewriteRefusal(response)
   } catch (error) {
     const timeout = error?.name === "TimeoutError" || error?.name === "AbortError"

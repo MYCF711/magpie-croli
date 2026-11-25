@@ -9,6 +9,7 @@ import { CODES, OFFICIAL_UA, errorText, readBody } from "./http.mjs"
 import { readJson, writeJson } from "./store.mjs"
 import { PROVIDER, defaultCroliAuthFiles, exchangeRelayKey, importDesktopKey } from "./croli.mjs"
 import { readPreferredUid } from "./preferred.mjs"
+import { discoverDesktopProxy } from "./croli-desktop-proxy.mjs"
 
 export const CLERK_TOKEN_URL = "https://clerk.croli.net/oauth/token"
 export const CLERK_CLIENT_ID = "znV4SkcUsY1AektQ"
@@ -109,12 +110,28 @@ function importedRecord(imported, auth, now) {
 }
 
 /** 由 magpie auth.refresh 调用；只有 invalid_grant 才标登录失效，网络错误保留账号。 */
-export async function refreshAccount(auth, { fetchImpl = fetch, env = process.env, now = Date.now } = {}) {
+export async function refreshAccount(auth, { fetchImpl = fetch, env = process.env, now = Date.now, desktopProxy = discoverDesktopProxy } = {}) {
   if (!auth || auth.type === "api") return undefined
   if (!expectedUid(auth)) throw fail("当前 Croli 账号缺少 userId，已阻止凭证回退；请重新一次性导入", 401, CODES.signInRequired)
   const desktop = await readDesktopAuth(env)
   const desktopSub = jwtSub(desktop.access_token)
   const desktopAllowed = desktopSub && desktopSub === expectedUid(auth)
+  if (desktopAllowed && await desktopProxy(auth)) {
+    const imported = await importDesktopKey({ fetchImpl, env, desktopProxy })
+    assertUidMatch(auth, imported.uid, "桌面登录账号")
+    return {
+      access: imported.key,
+      refresh: imported.refreshToken,
+      expires: imported.expiresAt,
+      metadata: {
+        ...(auth.metadata ?? {}),
+        ...imported.metadata,
+      },
+    }
+  }
+  if (auth.metadata?.kind === "croli-desktop-proxy") {
+    throw fail("Croli 本机代理不可用，请保持同账号的免费 Codex 会话运行", 503, CODES.upstreamUnavailable, { signIn: "kept" })
+  }
   let token = secret(auth.refresh)
   if (!token && desktopAllowed) token = secret(desktop.refresh_token)
   if (!token) {
