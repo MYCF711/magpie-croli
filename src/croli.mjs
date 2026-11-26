@@ -14,21 +14,14 @@ export const RELAY_SEARCH = "https://api.croli.net/relay/api/relay/search"
 export const CREDITS_BALANCE = "https://ds.croli.net/credits/v1/account/balance"
 
 /**
- * 账号可用性判据：登录时只要求中转资源覆盖这几个。
+ * 账号可用性判据：只认 Croli 网关地址 + 至少一个已知可用模型。
  *
- * 其余规格只参与排序 —— 上游增减模型不会再把一次正常的登录误判成失败。
- *
- * ⚠ `grok-4.6` **不在这里**：2026-11-20 实测它既不在 `GET /v1/models`
- * 的返回里，直连也只会拿到 `503 No available channel for model grok-4.6
- * under group default`。把「当前完全不可服务」的模型放进核心判据，
- * 等于把登录的成败挂在一个随时会被上游删掉的名字上 —— 正是这条判据要消灭的脆性。
- * 它仍留在 `MODEL_SPECS` 里参与排序，活目录会按 `/v1/models` 自动把它过滤掉。
+ * 2026-11-26 上游实测：免费资源仍有 Key，但模型列表已从 `gpt-6-luna`
+ * 换成 `gpt-5.6-luna` / `gpt-6.1-sol` 等；旧的三模型硬门槛会把正常账号
+ * 误判成「没有可用 Key」。因此不再绑定具体模型名，只排除已知不可服务的
+ * `grok-4.6`，并要求至少命中一个已知模型。
  */
-export const CORE_MODEL_IDS = Object.freeze([
-  "DeepSeek-V4.1-Flash",
-  "gpt-6-luna",
-  "claude-opus-5.5",
-])
+const UNUSABLE_MODEL_IDS = new Set(["grok-4.6"])
 
 // context / output / efforts 目前只作文档用途（代码只读 id 与 name）。
 // 新增几项的上游窗口未公布，先按同族口径填写，实测后再订正。
@@ -120,11 +113,20 @@ export async function exchangeRelayKey(jwt, { fetchImpl = fetch } = {}) {
     const endpoint = String(resource?.url ?? resource?.endpoint ?? "").replace(/\/+$/, "")
     const models = Array.isArray(resource?.models) ? resource.models : []
     const matches = MODEL_SPECS.filter((spec) => models.includes(spec.id)).length
-    const coreMatches = CORE_MODEL_IDS.filter((id) => models.includes(id)).length
-    return { resource, key, endpoint, matches, coreMatches }
-  }).filter((item) => item.key && item.endpoint === BASE && item.coreMatches === CORE_MODEL_IDS.length)
-    .sort((a, b) => b.matches - a.matches)
-  if (!candidates.length) throw fail("免费资源中没有可用的 Croli 网关 Key（缺核心模型）", 404, CODES.modelNotFound)
+    const usable = MODEL_SPECS.filter((spec) => !UNUSABLE_MODEL_IDS.has(spec.id) && models.includes(spec.id)).length
+    return { resource, key, endpoint, matches, usable, modelCount: models.length }
+  }).filter((item) => item.key && item.endpoint === BASE && item.usable > 0)
+    .sort((a, b) => b.usable - a.usable || b.matches - a.matches || b.modelCount - a.modelCount)
+  if (!candidates.length) {
+    const endpoints = [...new Set(resources.map((resource) => String(resource?.url ?? resource?.endpoint ?? "").replace(/\/+$/, "")).filter(Boolean))]
+    const withKey = resources.filter((resource) => cleanSecret(resource?.sk ?? resource?.apiKey)).length
+    const withModels = resources.filter((resource) => Array.isArray(resource?.models) && resource.models.length > 0).length
+    throw fail(
+      `免费资源中没有可用的 Croli 网关 Key（上游 ${resources.length} 个资源；带 Key ${withKey} 个、带模型 ${withModels} 个；网关地址：${endpoints.join(" / ") || "无"}）`,
+      404,
+      CODES.modelNotFound,
+    )
+  }
   const selected = candidates[0]
   return { key: selected.key, endpoint: selected.endpoint, matchedModels: selected.matches }
 }
