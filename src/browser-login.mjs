@@ -18,8 +18,10 @@ import { existsSync, rmSync } from "node:fs"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createServer } from "node:net"
+import { createServer } from "node:http"
 import { execFileSync } from "node:child_process"
+import { OFFICIAL_UA } from "./http.mjs"
+import { generatePkce, randomState, startLoopback } from "./oauth-pkce.mjs"
 
 const WIN_EXES = [
   "chrome.exe",
@@ -150,6 +152,18 @@ export function selectCookies(cookies, names) {
   return { header: Object.entries(found).map(([k, v]) => `${k}=${v}`).join("; "), found }
 }
 
+function decodeJwt(value) {
+  const token = String(value ?? "").trim()
+  const parts = token.split(".")
+  if (parts.length !== 3 || !parts.every(Boolean)) return null
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"))
+    return payload && typeof payload === "object" && !Array.isArray(payload) ? { token, payload } : null
+  } catch {
+    return null
+  }
+}
+
 /** 等一个文件出现；超时返回 false，不抛。 */
 export async function waitForFile(file, timeoutMs = 30_000, stepMs = 200) {
   const until = Date.now() + timeoutMs
@@ -262,6 +276,198 @@ export async function chromiumLogin({ browser, url, cookieNames = [], timeoutMs 
     throw new Error(`登录超时：没有拿到 ${cookieNames.join(" / ")}`)
   } finally {
     cleanup()
+  }
+}
+
+export function buildCroliOAuthUrl({ redirectUri, challenge, state, clientId = "znV4SkcUsY1AektQ" }) {
+  const url = new URL("https://clerk.croli.net/oauth/authorize")
+  url.searchParams.set("response_type", "code")
+  url.searchParams.set("client_id", clientId)
+  url.searchParams.set("redirect_uri", redirectUri)
+  url.searchParams.set("scope", "profile email offline_access")
+  url.searchParams.set("code_challenge", challenge)
+  url.searchParams.set("code_challenge_method", "S256")
+  url.searchParams.set("state", state)
+  return url.toString()
+}
+
+export async function exchangeCroliOAuthCode({ code, redirectUri, verifier, clientId = "znV4SkcUsY1AektQ", fetchImpl = fetch }) {
+  const response = await fetchImpl("https://clerk.croli.net/oauth/token", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      "user-agent": OFFICIAL_UA,
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: verifier,
+    }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(data?.error_description || data?.error || `Clerk OAuth token 返回 HTTP ${response.status}`)
+  }
+  const accessToken = String(data?.access_token ?? "")
+  const refreshToken = String(data?.refresh_token ?? "")
+  const expiresIn = Number(data?.expires_in)
+  if (!accessToken || !Number.isFinite(expiresIn) || expiresIn <= 0) {
+    throw new Error("Clerk OAuth 响应缺少 access_token 或有效 expires_in")
+  }
+  return { accessToken, refreshToken, expiresIn }
+}
+
+/**
+ * 准备一次 Croli 官方桌面同款 OAuth：本机 loopback 回调 + PKCE S256。
+ * 浏览器由 magpie 用系统默认程序打开（authorize 返回 opened:false），
+ * 因此会沿用用户 Edge/Chrome 里已有的 Croli、Google、GitHub 登录态。
+ */
+export async function beginCroliOAuth({ timeoutMs = 5 * 60_000, signal } = {}) {
+  const { verifier, challenge } = generatePkce()
+  const state = randomState()
+  const loopback = await startLoopback({
+    state,
+    path: "/callback",
+    timeoutMs,
+    signal,
+    successHtml: "<!doctype html><meta charset=\"utf-8\"><title>Croli</title><h2>登录回调已收到</h2><p>可以关闭此页面并返回 Magpie。</p>",
+    failureHtml: "<!doctype html><meta charset=\"utf-8\"><title>Croli</title><h2>登录未完成</h2><p>请回到 Magpie 查看错误后重新登录。</p>",
+  })
+  return {
+    url: buildCroliOAuthUrl({ redirectUri: loopback.redirectUri, challenge, state }),
+    redirectUri: loopback.redirectUri,
+    async complete({ fetchImpl = fetch } = {}) {
+      try {
+        const callback = await loopback.wait()
+        const token = await exchangeCroliOAuthCode({
+          code: callback.code,
+          redirectUri: loopback.redirectUri,
+          verifier,
+          fetchImpl,
+        })
+        const decoded = decodeJwt(token.accessToken)
+        return { ...token, payload: decoded?.payload ?? {} }
+      } finally {
+        loopback.close()
+      }
+    },
+    close: () => loopback.close(),
+  }
+}
+
+const CROLI_INVITE_URL_RE = /^https:\/\/www\.croli\.net\/invite\/\?code=[A-Za-z0-9_-]{4,128}$/
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch])
+}
+
+function inviteGuideHtml({ inviteUrl, oauthUrl, note }) {
+  return [
+    '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>用邀请链接注册 Croli · Magpie</title></head>',
+    '<body style="font-family:system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem;line-height:1.7">',
+    "<h2>用邀请链接注册 Croli</h2>",
+    `<p>${escapeHtml(note)}</p>`,
+    "<ol>",
+    `<li><a href="${escapeHtml(inviteUrl)}" target="_blank" rel="noopener noreferrer">打开 Croli 邀请页并登录 / 注册</a>（新标签页打开）<br>仅新注册账号有效，邀请由官方页面在登录后记录；已有账号请回 Magpie 改用「用浏览器登录」。</li>`,
+    "<li>邀请页显示登录成功后，回到本页点下面的按钮，再点「允许」。</li>",
+    "</ol>",
+    `<p><a href="${escapeHtml(oauthUrl)}">继续：授权并导入到 Magpie</a></p>`,
+    "<p>本页由 Magpie 插件在本机临时提供，超时前请勿关闭。</p>",
+    "</body></html>",
+  ].join("")
+}
+
+/** 本机引导页：只有两个链接、不执行脚本；Host 必须是 127.0.0.1:<port>，只收 GET。 */
+async function listenInviteGuide({ inviteUrl, oauthUrl, note, timeoutMs, signal }) {
+  let server
+  let port = 0
+  let timer = null
+  const close = () => {
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+    signal?.removeEventListener("abort", close)
+    try {
+      server?.close()
+    } catch {}
+    try {
+      server?.closeIdleConnections?.()
+    } catch {}
+  }
+  const reply = (response, status, text, type = "text/html; charset=utf-8") => {
+    if (response.writableEnded) return
+    response.writeHead(status, {
+      "content-type": type,
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+      connection: "close",
+    })
+    response.end(text)
+  }
+  server = createServer((request, response) => {
+    if (request.method !== "GET") return reply(response, 405, "Method not allowed", "text/plain; charset=utf-8")
+    if (request.headers.host !== `127.0.0.1:${port}`) return reply(response, 404, "Not found", "text/plain; charset=utf-8")
+    if (new URL(request.url ?? "/", "http://127.0.0.1").pathname !== "/") return reply(response, 404, "Not found", "text/plain; charset=utf-8")
+    reply(response, 200, inviteGuideHtml({ inviteUrl, oauthUrl, note }))
+  })
+  await new Promise((resolve, reject) => {
+    let listening = false
+    server.on("error", (error) => {
+      if (!listening) reject(error)
+      else close()
+    })
+    server.listen(0, "127.0.0.1", () => {
+      listening = true
+      resolve()
+    })
+  })
+  port = server.address().port
+  if (signal?.aborted) {
+    close()
+  } else {
+    signal?.addEventListener("abort", close, { once: true })
+    timer = setTimeout(close, timeoutMs)
+    timer.unref?.()
+  }
+  return { url: `http://127.0.0.1:${port}/`, port, close }
+}
+
+/**
+ * 邀请注册的浏览器登录：引导页 → 官方邀请页登录（邀请由官方页面自己记录）→ OAuth 授权 → 换令牌。
+ * 引导页交给 magpie 用系统默认浏览器打开；令牌链路复用 beginCroliOAuth。
+ */
+export async function beginCroliInviteOAuth({ inviteUrl, note = "", timeoutMs = 10 * 60_000, signal } = {}) {
+  const target = String(inviteUrl ?? "")
+  if (!CROLI_INVITE_URL_RE.test(target)) throw new Error("邀请链接不是 Croli 官方邀请地址")
+  const flow = await beginCroliOAuth({ timeoutMs, signal })
+  let guide
+  try {
+    guide = await listenInviteGuide({ inviteUrl: target, oauthUrl: flow.url, note, timeoutMs, signal })
+  } catch (error) {
+    flow.close()
+    throw error
+  }
+  return {
+    url: guide.url,
+    port: guide.port,
+    inviteUrl: target,
+    redirectUri: flow.redirectUri,
+    close: () => {
+      guide.close()
+      flow.close()
+    },
+    async complete(options) {
+      try {
+        return await flow.complete(options)
+      } finally {
+        guide.close()
+      }
+    },
   }
 }
 

@@ -96,8 +96,13 @@ test("登录第一问是邀请来源 select，默认首选账号且 authorize �
     const before = calls
     const result = await method.authorize(undefined)
     assert.equal(calls, before, "authorize 不重新取码或重新选账号")
-    assert.equal(result.url, "https://www.croli.net/invite/?code=Preferred123")
+    assert.equal(result.opened, false, "引导页由 magpie 用默认浏览器打开")
+    assert.match(result.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
     assert.match(result.instructions, /仅新注册账号有效/)
+    const page = await fetch(result.url)
+    assert.equal(page.status, 200)
+    assert.ok((await page.text()).includes("https://www.croli.net/invite/?code=Preferred123"))
+    result.close()
   } finally {
     await rm(cacheDir, { recursive: true, force: true })
     await rm(configDir, { recursive: true, force: true })
@@ -111,7 +116,9 @@ test("指定账号取自己的码并记住选择，下一次仍排第一", async
     const method = plugin.auth.methods[1]
     await method.ask({})
     assert.equal(await method.ask({ inviteSource: "user_B" }), null)
-    assert.equal((await method.authorize(undefined)).url, "https://www.croli.net/invite/?code=Latest123")
+    const result = await method.authorize(undefined)
+    assert.ok((await (await fetch(result.url)).text()).includes("https://www.croli.net/invite/?code=Latest123"))
+    result.close()
     assert.equal(JSON.parse(await readFile(join(cacheDir, "croli-invite-source.json"), "utf8")).code, "user_B")
 
     const next = await CroliAuthPlugin({}, pluginOptions(cacheDir, configDir))
@@ -129,7 +136,9 @@ test("显式选择 latest 记住的是滚动策略而不是当前账号", async 
     const method = plugin.auth.methods[1]
     await method.ask({})
     assert.equal(await method.ask({ inviteSource: "latest" }), null)
-    assert.equal((await method.authorize(undefined)).url, "https://www.croli.net/invite/?code=Latest123")
+    const result = await method.authorize(undefined)
+    assert.ok((await (await fetch(result.url)).text()).includes("https://www.croli.net/invite/?code=Latest123"))
+    result.close()
     assert.equal(JSON.parse(await readFile(join(cacheDir, "croli-invite-source.json"), "utf8")).code, "latest")
     const next = await CroliAuthPlugin({}, pluginOptions(cacheDir, configDir))
     assert.equal(next.auth.methods[1].prompts[0].options[0].value, "latest")
@@ -146,7 +155,9 @@ test("关闭首选开关后不提问，自动使用最新账号", async () => {
     const method = plugin.auth.methods[1]
     assert.deepEqual(method.prompts, [])
     assert.equal(await method.ask({}), null)
-    assert.equal((await method.authorize(undefined)).url, "https://www.croli.net/invite/?code=Latest123")
+    const result = await method.authorize(undefined)
+    assert.ok((await (await fetch(result.url)).text()).includes("https://www.croli.net/invite/?code=Latest123"))
+    result.close()
   } finally {
     await rm(cacheDir, { recursive: true, force: true })
     await rm(configDir, { recursive: true, force: true })
@@ -161,7 +172,9 @@ test("手动分支才问邀请码并记住，非法输入不会进入注册链�
     await method.ask({})
     assert.equal((await method.ask({ inviteSource: "manual" })).key, "invite")
     assert.equal(await method.ask({ inviteSource: "manual", invite: "Manual123" }), null)
-    assert.equal((await method.authorize(undefined)).url, "https://www.croli.net/invite/?code=Manual123")
+    const result = await method.authorize(undefined)
+    assert.ok((await (await fetch(result.url)).text()).includes("https://www.croli.net/invite/?code=Manual123"))
+    result.close()
     assert.equal(JSON.parse(await readFile(join(cacheDir, "croli-invite.json"), "utf8")).code, "Manual123")
     assert.equal(JSON.parse(await readFile(join(cacheDir, "croli-invite-source.json"), "utf8")).code, "manual")
     const remembered = await CroliAuthPlugin({}, pluginOptions(cacheDir, configDir))

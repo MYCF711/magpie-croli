@@ -5,6 +5,7 @@ import { createUsageCache } from "./src/usage-cache.mjs"
 import { createRefreshLock } from "./src/refresh-lock.mjs"
 import { uidOf } from "./src/credential.mjs"
 import { OFFICIAL_UA } from "./src/http.mjs"
+import { beginCroliInviteOAuth, beginCroliOAuth } from "./src/browser-login.mjs"
 import {
   refreshAccount,
   checkinToday,
@@ -25,6 +26,7 @@ import {
   MODEL_SPECS,
   gatewayKeyOf,
   forwardRequest,
+  exchangeRelayKey,
   importDesktopKey,
   fetchLiveModels,
   fetchCredits,
@@ -157,6 +159,81 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
       return { type: "failed", error: String(error?.message ?? error) }
     }
   }
+  const browserLoginResult = async (flow, loginMethod) => {
+    try {
+      const token = await flow.complete({ fetchImpl: _options.fetchImpl })
+      const exchanged = await exchangeRelayKey(token.accessToken, { fetchImpl: _options.fetchImpl })
+      const payload = token.payload && typeof token.payload === "object" ? token.payload : {}
+      const userId = String(payload.sub ?? "")
+      const expiresAt = Number(payload.exp) > 0 ? Number(payload.exp) * 1000 : 0
+      return {
+        type: "success",
+        access: exchanged.key,
+        refresh: token.refreshToken || "",
+        expires: token.expiresIn > 0 ? Date.now() + token.expiresIn * 1000 : expiresAt,
+        accountId: String(payload.email ?? payload.primary_email_address ?? payload.sub ?? ""),
+        uid: userId,
+        metadata: {
+          kind: "croli-gateway-key",
+          userId,
+          croliAccessToken: token.accessToken,
+          ...(expiresAt ? { croliExpiresAt: new Date(expiresAt).toISOString() } : {}),
+          loginMethod,
+        },
+      }
+    } catch (error) {
+      return { type: "failed", error: `浏览器登录失败：${String(error?.message ?? error)}` }
+    }
+  }
+  const browserLoginFailed = (message) => ({
+    url: "https://www.croli.net/",
+    instructions: message,
+    method: "auto",
+    opened: true,
+    async callback() {
+      return { type: "failed", error: message }
+    },
+  })
+  const startBrowserLogin = async () => {
+    let flow
+    try {
+      flow = await beginCroliOAuth({ timeoutMs: 5 * 60_000 })
+    } catch (error) {
+      return browserLoginFailed(`无法准备浏览器登录：${String(error?.message ?? error)}`)
+    }
+    return {
+      url: flow.url,
+      instructions: "已交给 Magpie 用系统默认浏览器打开授权页。请完成 Google/GitHub 或邮箱验证码登录；看到「登录回调已收到」后返回 Magpie。GitHub 若提示限流，请改用邮箱验证码或 Google，不要连续重试。",
+      method: "auto",
+      opened: false,
+      close: () => flow.close(),
+      callback: () => browserLoginResult(flow, "browser-oauth"),
+    }
+  }
+  const startInviteBrowserLogin = async () => {
+    const selected = pendingInvite ?? cachedInvite()
+    if (!selected.code) {
+      return browserLoginFailed("未找到可用邀请码；请回 Magpie 重新选择邀请来源，或改用「用浏览器登录」")
+    }
+    let flow
+    try {
+      flow = await beginCroliInviteOAuth({
+        inviteUrl: selected.url,
+        note: "邀请关系只在官方邀请页登录 / 注册成功时建立；本页不会替你提交邀请。",
+        timeoutMs: 10 * 60_000,
+      })
+    } catch (error) {
+      return browserLoginFailed(`无法准备邀请注册登录：${String(error?.message ?? error)}`)
+    }
+    return {
+      url: flow.url,
+      instructions: "已打开本机引导页（10 分钟内有效）：① 点「打开 Croli 邀请页并登录 / 注册」，仅新注册账号有效，邀请由官方页面自己记录；② 邀请页登录成功后回到本页点「继续：授权并导入到 Magpie」，再点允许。已有账号请取消后改用「用浏览器登录」。GitHub 若提示限流，请改用邮箱验证码或 Google。",
+      method: "auto",
+      opened: false,
+      close: () => flow.close(),
+      callback: () => browserLoginResult(flow, "browser-oauth-invite"),
+    }
+  }
 
   return {
     // ① provider 与静态模型表
@@ -212,7 +289,7 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
           },
         },
         {
-          // 新账号注册：默认使用首选账号的邀请链接；已有账号请用一次性导入，不重复绑定。
+          // 新账号注册：官方邀请页登录建立邀请关系，再走 OAuth 导入；已有账号用「用浏览器登录」。
           type: "oauth",
           label: "使用邀请链接注册并导入",
           get prompts() {
@@ -238,17 +315,7 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
             return null
           },
           async authorize() {
-            const selected = pendingInvite ?? cachedInvite()
-            const hasCode = Boolean(selected.code)
-            return {
-              url: hasCode ? selected.url : "https://www.croli.net/",
-              instructions: hasCode
-                ? "将打开默认邀请源链接。仅新注册账号有效；注册并登录桌面端后返回完成导入。"
-                : "未找到可用邀请码，将打开官网。仅新注册账号有效；登录桌面端后返回完成导入。",
-              method: "auto",
-              opened: true,
-              callback: importDesktopResult,
-            }
+            return await startInviteBrowserLogin()
           },
         },
         {
@@ -257,11 +324,19 @@ export const CroliAuthPlugin = async (_ctx = {}, _options = {}) => {
           label: "Croli 网关 API Key",
           placeholder: "csk_...",
         },
+        {
+          // 受控浏览器：Chrome / Edge / 国产 Chromium 都可，走官方桌面同款 OAuth + PKCE。
+          type: "oauth",
+          label: "用浏览器登录（Edge / Chrome）",
+          async authorize() {
+            return await startBrowserLogin()
+          },
+        },
       ],
 
       // ③ 聊天仍用网关 Key；账户 JWT 由 Clerk 公共客户端续期，同账号 single-flight。
       async refresh(auth) {
-        if (!auth || auth.type === "api") return undefined
+        if (!auth || auth.type === "api" || !auth.refresh) return undefined
         return refreshLock.run(`${PROVIDER}\n${auth.refresh || uidOf(auth)}`, () => refreshAccount(auth))
       },
 

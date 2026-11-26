@@ -22,7 +22,7 @@ test("入口只导出一个插件工厂", () => {
   assert.equal(typeof _internal, "object")
 })
 
-test("九项钩子、三种登录与数据字段齐全", async () => {
+test("九项钩子、四种登录与数据字段齐全", async () => {
   const plugin = await CroliAuthPlugin({ client: {} })
   assert.equal(typeof plugin.config, "function")
   assert.equal(plugin.auth.provider, "croli")
@@ -35,13 +35,15 @@ test("九项钩子、三种登录与数据字段齐全", async () => {
   assert.equal(plugin.provider.id, "croli")
   assert.ok(plugin.auth.icon.startsWith("data:image/"))
   assert.ok(plugin.auth.maxConcurrency >= 1)
-  assert.equal(plugin.auth.methods.length, 3)
+  assert.equal(plugin.auth.methods.length, 4)
   assert.equal(plugin.auth.methods[0].type, "oauth")
   assert.equal(plugin.auth.methods[0].authorize.constructor.name, "AsyncFunction")
   assert.equal(plugin.auth.methods[1].type, "oauth")
   assert.equal(plugin.auth.methods[1].authorize.constructor.name, "AsyncFunction")
   assert.equal(plugin.auth.methods[2].type, "api")
   assert.equal(plugin.auth.methods[2].authorize, undefined, "API Key 应由宿主原样保存")
+  assert.equal(plugin.auth.methods[3].type, "oauth")
+  assert.equal(plugin.auth.methods[3].authorize.constructor.name, "AsyncFunction")
 })
 
 test("config 声明完整模型表，窗口和实测图片能力完整", async () => {

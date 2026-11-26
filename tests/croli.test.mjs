@@ -131,7 +131,7 @@ test("live 缺少目标模型时不从静态表补回", async () => {
   assert.deepEqual(models.map((model) => model.id), ["grok-4.6"])
 })
 
-test("relay 选择覆盖核心模型的网关 Key", async () => {
+test("relay 选择已知可用模型最多的网关 Key", async () => {
   const result = await exchangeRelayKey(fakeJwt({ sub: "user_test" }), {
     fetchImpl: async (url) => {
       assert.equal(url, RELAY_SEARCH)
@@ -149,6 +149,28 @@ test("relay 选择覆盖核心模型的网关 Key", async () => {
   await assert.rejects(() => exchangeRelayKey(fakeJwt(), {
     fetchImpl: async () => json({ resources: [{ url: BASE, sk: "csk_partial", models: ["grok-4.6"] }] }),
   }), /没有可用的 Croli 网关 Key/)
+})
+
+test("relay 接受上游已移除 gpt-6-luna 的正常资源", async () => {
+  const models = [
+    "DeepSeek-V4.1-Flash",
+    "gpt-5.6-luna",
+    "gpt-5.6-sol",
+    "gpt-6.1-sol",
+    "claude-opus-5.5",
+    "grok-4.6",
+    "claude-sonnet-5",
+    "gemini-4-argon",
+  ]
+  const result = await exchangeRelayKey(fakeJwt({ sub: "user_test" }), {
+    fetchImpl: async (url) => {
+      assert.equal(url, RELAY_SEARCH)
+      return json({ resources: [{ url: BASE, sk: "csk_live", models }] })
+    },
+  })
+  assert.equal(result.key, "csk_live")
+  assert.equal(result.endpoint, BASE)
+  assert.equal(result.matchedModels, 7)
 })
 
 test("一次性导入只依赖临时 auth 文件，返回独立 Key 与账号 metadata", async () => {

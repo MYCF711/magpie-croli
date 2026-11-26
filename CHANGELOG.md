@@ -1,5 +1,29 @@
 # 更新记录
 
+## 0.1.8 — 2026-11-26
+
+**浏览器 OAuth 登录；登录判据不再绑死模型名；邀请注册走官方邀请页**
+
+- 新增「用浏览器登录（Edge / Chrome）」：官方桌面同款 OAuth + PKCE，
+  本机 `127.0.0.1:<随机端口>/callback` 收一次性回调，`opened: false` 交给
+  magpie 用系统默认浏览器打开授权页。回调复用 `src/oauth-pkce.mjs` 的
+  `startLoopback`（Host / state / CSP / 超时 / 关闭校验），不使用 CDP 拦截，
+  也不另起临时浏览器 profile。
+- 「使用邀请链接注册并导入」不再读桌面端 `auth.json`：`authorize()` 返回本机引导页
+  （10 分钟有效），先打开官方邀请页登录 / 注册，再点「继续」走 OAuth 授权导入。
+  邀请关系由官方邀请页登录后自己 `POST /api/invite/claim` 建立；插件不代发 claim、
+  不调绑定端点，也不把码塞进 OAuth 授权 URL。引导页只含两个链接、无脚本，
+  只接受 `https://www.croli.net/invite/?code=<码>`。
+- `exchangeRelayKey` 不再要求 `gpt-6-luna` 等固定模型。2026-11-26 上游实测
+  免费资源仍有 Key，但模型已换成 `gpt-5.6-luna` / `gpt-6.1-sol` 等；
+  现在只要求 Croli 网关地址 + 至少一个已知可用模型，`grok-4.6` 仍排除。
+  无可用资源时的报错会带上资源数、带 Key 数与网关地址，便于上游排查。
+- 浏览器登录账号记为 `browser-oauth`，邀请注册账号记为 `browser-oauth-invite`；
+  没有 refresh token 的账号不再触发桌面导入刷新链。
+- 测试：新增浏览器 OAuth / 引导页 / 邀请注册端到端与 relay 回归用例；
+  `node --test` 全绿，`node scripts/check.mjs` 45 pass / 0 warn / 0 fail，
+  `check-ua` 0 违规，`privacy-scan` 0 处。
+
 ## 0.1.7 — 2026-11-21
 
 **核心判据去掉不可服务的 `grok-4.6`；模型数量文案改为不写死**

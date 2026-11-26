@@ -30,13 +30,19 @@ DSH / 其他 OpenAI 客户端
 
 1. `authorize()` 立即返回 `opened: true`，不等待网络。
 2. `callback()` 读取一次 Croli `auth.json` 的 Clerk access token。
-3. 用 `GET https://api.croli.net/relay/api/relay/search` 换取覆盖核心模型的 `sk`（判据见 `CORE_MODEL_IDS`）。
+3. 用 `GET https://api.croli.net/relay/api/relay/search` 换取至少覆盖一个已知可用模型的 `sk`（不再绑定具体模型名）。
 4. 宿主保存 `{ type: "oauth", access: <sk>, refresh: <Clerk refresh token>, expires: <ms> }`。
 5. 聊天只使用 `sk`；账户 JWT 用于积分、签到、每日任务和邀请。
 
 `refresh()` 通过 `https://clerk.croli.net/oauth/token` 的公共客户端表单续期，只发送 `grant_type`、`client_id`、`refresh_token` 三项。新 refresh token 非空就替换，否则保留旧值；同账号 single-flight。遇到 `invalid_grant` 时，仅在本机登录文件提供了不同 token 的情况下重试一次，用于兼容官方客户端已经轮换 token 的场景。网络错误不会误删账号。
 
 纯 API Key 不进入刷新链，聊天始终不依赖官方客户端进程。网关目录没有返回 `sk` 的 TTL；Key 被吊销或轮换时，重新导入即可。
+
+### 浏览器登录
+
+`auth.methods[3]` 走官方桌面同款 OAuth + PKCE：本机 `127.0.0.1:<随机端口>/callback` 收一次性回调，`opened: false` 交给 magpie 用系统默认浏览器（Edge / Chrome）打开授权页。回调由 `src/oauth-pkce.mjs` 的 `startLoopback` 处理（Host / state / CSP / 超时校验），不使用 CDP 拦截，也不另起临时浏览器 profile。
+
+`auth.methods[1]` 在同一个 loopback 前面加一个本机引导页 `http://127.0.0.1:<随机端口>/`（10 分钟有效）：页面只给两个链接——官方邀请页 `https://www.croli.net/invite/?code=<码>` 与 Clerk 授权 URL，无脚本、CSP `default-src 'none'`。`beginCroliInviteOAuth` 只接受官方邀请地址，外部 origin / 非 https / 空码 / 凭据形状一律拒绝；令牌与网关 Key 的换取与 `auth.methods[3]` 共用一条路径，登录方式记为 `browser-oauth-invite`。
 
 ## 提示词与请求原样性
 
@@ -67,7 +73,7 @@ DSH / 其他 OpenAI 客户端
 - `POST /credits/v1/invite/code` 固定 `{rotate:false}`；官方稳定分享地址为 `https://www.croli.net/invite/?code=<code>`。
 - 邀请缓存位于 `~/.cache/magpie/croli-invite-<账号指纹>.json`，只保存 code、URL、奖励与完成统计。账号索引只保存稳定 uid 的散列文件名与首次/最近见到时间，不保存显示名或 token。
 - 默认 `invite_preferred=true`：`inviteSource` 下拉把 Magpie 首选 uid 排在第一项，也可选 `latest`、其他稳定 uid 或 `manual`。选择写入独立 `croli-invite-source.json`，不保存 token；关闭开关时直接使用最新账号。
-- 「使用邀请链接注册并导入」在 `ask()` 中按所选 uid 调 `ensureInvite()` 取该账号自己的码并记住选择，`authorize(undefined)` 复用同一快照，零出站。手动分支才显示邀请码输入，预留码与账号选择分文件保存。邀请关系只在用户于官方页面新注册时建立，已有账号不调用绑定端点。
+- 「使用邀请链接注册并导入」在 `ask()` 中按所选 uid 调 `ensureInvite()` 取该账号自己的码并记住选择，`authorize(undefined)` 复用同一快照，零出站。手动分支才显示邀请码输入，预留码与账号选择分文件保存。`authorize()` 返回本机引导页（`opened: false`，magpie 用默认浏览器打开）：先开官方邀请页登录 / 注册，再点「继续」走 OAuth 授权导入。邀请关系只在用户于官方邀请页登录成功时由页面自己 `POST /api/invite/claim` 建立；插件不代发 claim，也不调绑定端点。仅新注册账号有效，已有账号用「用浏览器登录」。
 
 「首选账号作为邀请源」与签到、Token 用量都显示完整说明，暂位于模型下方，三个开关在调用点实时读取。关闭邀请后自动使用最近账号，关闭签到后不执行签到或任务事件上报。Magpie 当前 `.plugin-options.top` 会撞上页头 `.top { height:46px }`，完整多行置顶需等待上游 #7353 修复。
 
